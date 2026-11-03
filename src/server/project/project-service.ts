@@ -41,6 +41,7 @@ export async function createFullProject(input: {
   mode: ProjectMode;
   inputRaw: string;
   inputUrls?: string[];
+  inputImages?: ProjectRecord['inputImages'];
   existingProjectPath?: string;
   destinationType?: DestinationType;
   localTargetPath?: string;
@@ -61,6 +62,14 @@ export async function createFullProject(input: {
     inputUrls: input.inputUrls || [],
     existingInspection,
   });
+
+  if (input.inputImages && input.inputImages.length > 0) {
+    brief.explicitFacts.push(
+      `Imágenes de referencia visual cargadas (${input.inputImages.length}): ${input.inputImages
+        .map((img) => `${img.fileName}${img.userNote ? ` ("${img.userNote}")` : ''}`)
+        .join(', ')}.`
+    );
+  }
 
   const stackComparison = await generateStackComparison(
     projectId,
@@ -87,6 +96,7 @@ export async function createFullProject(input: {
     mode: input.mode,
     inputRaw: input.inputRaw,
     inputUrls: input.inputUrls || [],
+    inputImages: input.inputImages || [],
     existingProjectPath: input.existingProjectPath,
     existingInspection,
     destinationType: input.destinationType || 'local',
@@ -150,6 +160,8 @@ export async function updateProjectBrief(
     }>;
     mvpScope?: string[];
     futureImprovements?: string[];
+    inputImages?: ProjectRecord['inputImages'];
+    masterAgentPrompt?: string;
     advanceWithAssumptions?: boolean;
   }
 ): Promise<ProjectRecord> {
@@ -177,6 +189,9 @@ export async function updateProjectBrief(
   if (update.mvpScope !== undefined) project.brief.mvpScope = update.mvpScope;
   if (update.futureImprovements !== undefined) {
     project.brief.futureImprovements = update.futureImprovements;
+  }
+  if (update.inputImages !== undefined) {
+    project.inputImages = update.inputImages;
   }
 
   if (update.clarifyingAnswers) {

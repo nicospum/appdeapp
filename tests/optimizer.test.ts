@@ -87,6 +87,41 @@ describe('Forja — Suite Completa de Verificación Funcional y Técnica (11 Esc
     // Alcance inicial realizable (MVP) separado de mejoras posteriores
     expect(project.brief.mvpScope.length).toBeGreaterThanOrEqual(2);
     expect(project.brief.futureImprovements.length).toBeGreaterThanOrEqual(1);
+    // Verifica que también se genere el Súper Prompt Maestro para el Agente Programador
+    expect(project.masterAgentPrompt).toBeTruthy();
+    expect(project.masterAgentPrompt).toContain('PROMPT MAESTRO DE CONSTRUCCIÓN');
+    expect(project.masterAgentPrompt).toContain('Agente Programador');
+    expect(
+      project.generatedArtifacts.some((a) => a.relativePath === 'PROMPT-MAESTRO-AGENTE.md')
+    ).toBe(true);
+  }, 45000);
+
+  it('1b. Carga de imágenes de referencia visual + Súper Prompt: integra las imágenes y notas del usuario en el brief y en el Prompt Maestro', async () => {
+    const samplePngDataUrl =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const projectWithImages = await createFullProject({
+      mode: 'new_project',
+      inputRaw: 'Quiero una app de gestión de turnos con un calendario semanal limpio como el de la imagen adjunta.',
+      inputUrls: [],
+      inputImages: [
+        {
+          id: 'img_ref_01',
+          fileName: 'calendario-referencia.png',
+          mimeType: 'image/png',
+          dataUrl: samplePngDataUrl,
+          sizeBytes: 96,
+          userNote: 'Usar barra lateral oscura y tarjetas de turnos con código de color por estado',
+        },
+      ],
+      destinationType: 'local',
+    });
+
+    expect(projectWithImages.inputImages?.length).toBe(1);
+    expect(projectWithImages.brief.explicitFacts.some((f) => f.includes('calendario-referencia.png'))).toBe(true);
+    expect(projectWithImages.masterAgentPrompt).toContain('calendario-referencia.png');
+    expect(projectWithImages.masterAgentPrompt).toContain(
+      'Usar barra lateral oscura y tarjetas de turnos con código de color por estado'
+    );
   }, 45000);
 
   it('2. Descripción detallada: respeta restricciones explícitas (Windows, $0/mes, privacidad local) y descalifica opciones incompatibles', async () => {

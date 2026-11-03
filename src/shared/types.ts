@@ -632,12 +632,23 @@ export interface GitHubSyncResult {
 // 10. Entidad Principal del Proyecto Persistido
 // ============================================================================
 
+export interface UploadedVisualReference {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  dataUrl: string;
+  sizeBytes: number;
+  userNote?: string;
+}
+
 export interface ProjectRecord {
   id: string;
   name: string;
   mode: ProjectMode;
   inputRaw: string;
   inputUrls: string[];
+  inputImages?: UploadedVisualReference[];
+  masterAgentPrompt?: string;
   existingProjectPath?: string;
   existingInspection?: ExistingProjectInspection;
   destinationType: DestinationType;
@@ -676,11 +687,21 @@ export interface ProviderConnectionStatus {
   statusMessage: string;
 }
 
+export const UploadedVisualReferenceSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  mimeType: z.string(),
+  dataUrl: z.string(),
+  sizeBytes: z.number(),
+  userNote: z.string().optional(),
+});
+
 // Esquemas Zod para validación de entradas en endpoints de API
 export const CreateProjectInputSchema = z.object({
   mode: z.enum(['new_project', 'existing_feature']),
   inputRaw: z.string().min(3, 'Ingresá al menos una frase o descripción.'),
   inputUrls: z.array(z.string()).optional().default([]),
+  inputImages: z.array(UploadedVisualReferenceSchema).optional().default([]),
   existingProjectPath: z.string().optional(),
   destinationType: z.enum(['local', 'github', 'both']).optional().default('local'),
   localTargetPath: z.string().optional(),
@@ -693,6 +714,8 @@ export const UpdateBriefInputSchema = z.object({
   targetUsers: z.string().optional(),
   problemStatement: z.string().optional(),
   coreFeatures: z.array(z.string()).optional(),
+  inputImages: z.array(UploadedVisualReferenceSchema).optional(),
+  masterAgentPrompt: z.string().optional(),
   constraints: z
     .object({
       targetOs: z.string(),

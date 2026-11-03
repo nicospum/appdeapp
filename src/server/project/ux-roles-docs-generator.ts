@@ -480,6 +480,138 @@ export async function buildAgentRolesAndTasks(project: ProjectRecord): Promise<{
   return { roles, tasks };
 }
 
+export function buildMasterAgentPrompt(project: ProjectRecord): string {
+  const {
+    brief,
+    mode,
+    existingInspection,
+    stackComparison,
+    reaCards,
+    capabilitySelections,
+    uxProposal,
+    tasks,
+    inputImages,
+  } = project;
+
+  const selectedStack = stackComparison?.options.find((o) => o.id === stackComparison.selectedOptionId);
+  const selectedTools = capabilitySelections.filter((c) => c.selectedForInstall);
+
+  const decisionsSummary = brief.clarifyingQuestions.map((q) => {
+    const chosenOpt = q.options.find((o) => o.id === q.selectedOptionId) || q.options.find((o) => o.recommended) || q.options[0];
+    return `- **${q.question}**\n  → Decisión confirmada: **${q.customAnswer || chosenOpt?.label || 'Opción recomendada'}**`;
+  });
+
+  const imagesSection =
+    inputImages && inputImages.length > 0
+      ? [
+          `## 3. Referencias Visuales e Imágenes de Cómo Debe Verse la Aplicación`,
+          `El usuario cargó **${inputImages.length} imagen(es) de referencia visual** para guiar el diseño e interfaz:`,
+          ...inputImages.map(
+            (img, idx) =>
+              `- **Imagen ${idx + 1} (\`${img.fileName}\`):** ${
+                img.userNote && img.userNote.trim()
+                  ? img.userNote.trim()
+                  : 'Respetar la estructura visual, distribución de paneles, jerarquía y estilo mostrados en esta referencia.'
+              }`
+          ),
+          `- Asegurate de replicar la claridad visual, disposición de bloques y simplicidad de interacción indicadas en estas referencias.`,
+          '',
+        ].join('\n')
+      : '';
+
+  return [
+    `# PROMPT MAESTRO DE CONSTRUCCIÓN — ${brief.title}`,
+    `> **Instrucción directa para el Agente Programador (Codex / Claude Code / Cursor / Antigravity)**`,
+    `> Este proyecto ya fue definido, investigado y estructurado. Tu objetivo es construirlo de principio a fin siguiendo exactamente estas decisiones.`,
+    '',
+    `## 1. Qué Queremos Construir (Visión y Objetivo)`,
+    `- **Proyecto:** ${brief.title}`,
+    `- **Modalidad:** ${mode === 'existing_feature' ? `Agregar o mejorar función sobre proyecto existente en \`${existingInspection?.rootPath || project.localTargetPath || '.'}\`` : 'Proyecto nuevo desde cero'}`,
+    `- **Objetivo principal:** ${brief.objective}`,
+    `- **Problema que resuelve:** ${brief.problemStatement}`,
+    `- **Usuarios destinatarios:** ${brief.targetUsers}`,
+    `- **Pedido original del usuario:** "${project.inputRaw}"`,
+    '',
+    mode === 'existing_feature' && existingInspection?.exists
+      ? [
+          `## 2. Reglas de Compatibilidad con el Proyecto Existente`,
+          `- **Ruta del proyecto:** \`${existingInspection.rootPath}\``,
+          `- **Stack detectado que DEBÉS preservar:** ${existingInspection.detectedStack.join(', ')}`,
+          `- **Estrategia de cambio mínimo compatible:** ${existingInspection.minimalChangeProposal.summary}`,
+          `- **Archivos a modificar:** \`${existingInspection.minimalChangeProposal.filesToTouch.join('`, `') || 'según estructura actual'}\``,
+          `- **Archivos nuevos sugeridos:** \`${existingInspection.minimalChangeProposal.filesToCreate.join('`, `') || 'módulos compatibles'}\``,
+          '',
+        ].join('\n')
+      : [
+          `## 2. Decisiones Clave y Supuestos Confirmados`,
+          ...decisionsSummary,
+          ...brief.inferredAssumptions.filter((a) => a.accepted).map((a) => `- **Supuesto aprobado (${a.category}):** ${a.statement}`),
+          '',
+        ].join('\n'),
+    imagesSection,
+    `## ${inputImages && inputImages.length > 0 ? '4' : '3'}. Stack Tecnológico Elegido y Restricciones Obligatorias`,
+    selectedStack
+      ? [
+          `- **Arquitectura elegida:** **${selectedStack.name}** (${selectedStack.tagline})`,
+          `- **Frontend / UI:** ${selectedStack.components.frontend}`,
+          `- **Backend / Lógica:** ${selectedStack.components.backend}`,
+          `- **Base de datos / Persistencia:** ${selectedStack.components.storage}`,
+          `- **Runtime:** ${selectedStack.components.runtime}`,
+          `- **Por qué se eligió:** ${stackComparison?.recommendationRationale || ''}`,
+        ].join('\n')
+      : `- **Stack:** Elegir la opción más simple y directa compatible con ${brief.constraints.targetOs}.`,
+    `- **Sistema Operativo objetivo:** ${brief.constraints.targetOs}`,
+    `- **Presupuesto / Infraestructura:** ${brief.constraints.budgetLimit} (Modo: ${brief.constraints.executionMode})`,
+    `- **Privacidad y secretos:** ${brief.constraints.privacyLevel}. Jamás hardcodees API keys ni credenciales en el código fuente.`,
+    '',
+    `## ${inputImages && inputImages.length > 0 ? '5' : '4'}. Alcance Funcional a Construir (MVP Realizable)`,
+    `Implementá de forma completa y funcional las siguientes capacidades principales:`,
+    ...brief.mvpScope.map((item, i) => `${i + 1}. ${item}`),
+    '',
+    brief.futureImprovements.length > 0
+      ? `*(Dejá preparado el diseño pero NO bloquees la entrega inicial con estas mejoras futuras: ${brief.futureImprovements.join('; ')})*\n`
+      : '',
+    `## ${inputImages && inputImages.length > 0 ? '6' : '5'}. Diseño de Interfaz (UX/UI) y Pantallas Principales`,
+    uxProposal
+      ? [
+          `- **Navegación:** ${uxProposal.navigationArchitecture}`,
+          ...uxProposal.keyScreens.map(
+            (scr) =>
+              `- **Pantalla "${scr.name}":** ${scr.purpose}\n  - Acciones clave: ${scr.primaryActions.join(', ')}\n  - Estados obligatorios: Vacío (${scr.states.empty}) | Cargando (${scr.states.loading}) | Error (${scr.states.errorAndRecovery})`
+          ),
+        ].join('\n')
+      : `- Diseñá una interfaz limpia, moderna, en español y fácil de entender a primera vista.`,
+    '',
+    `## ${inputImages && inputImages.length > 0 ? '7' : '6'}. Plan de Ejecución Paso a Paso y Estructura de Archivos`,
+    ...tasks.map(
+      (t, idx) =>
+        `### Paso ${idx + 1}: ${t.title} (${t.priority})\n- **Qué hacer:** ${t.description}\n- **Archivos/módulos:** \`${t.ownedFilesScope.join('`, `')}\`\n- **Criterio de aceptación:** ${t.acceptanceCriteria.join(' ')}`
+    ),
+    '',
+    reaCards.length > 0
+      ? [
+          `## ${inputImages && inputImages.length > 0 ? '8' : '7'}. Patrones de Referencia Verificados (REA) y Herramientas`,
+          ...reaCards.map(
+            (c) => `- **Referencia ${c.targetName}:** ${c.reusablePatternOrCode} *(Adaptación: ${c.requiredAdaptations.join('; ')})*`
+          ),
+          selectedTools.length > 0
+            ? `- **Skills y Herramientas de apoyo:** ${selectedTools.map((s) => `${s.entry.name} (${s.entry.kind})`).join(', ')}`
+            : '',
+          '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '',
+    `## Verificación Final Obligatoria`,
+    `Antes de dar por terminada la tarea:`,
+    `1. Verificá que el proyecto compile sin errores de tipos ni dependencias faltantes.`,
+    `2. Ejecutá las pruebas automatizadas y comprobá que el flujo principal funcione de punta a punta.`,
+    `3. Dejá instrucciones claras de un solo comando (\`npm run dev\`) para levantar la aplicación.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 // ============================================================================
 // 3. Generación del Paquete de Documentación Proporcional y Manifiesto JSON
 // ============================================================================
@@ -823,12 +955,21 @@ export function generateProjectArtifacts(
   };
   const manifestJsonContent = JSON.stringify(manifestObj, null, 2);
 
+  const masterPromptContent = buildMasterAgentPrompt(project);
+  project.masterAgentPrompt = masterPromptContent;
+
   const rawFiles: Array<{
     relativePath: string;
     artifactCategory: GeneratedArtifactFile['artifactCategory'];
     title: string;
     content: string;
   }> = [
+    {
+      relativePath: 'PROMPT-MAESTRO-AGENTE.md',
+      artifactCategory: 'agent_instructions',
+      title: 'Prompt Maestro Completo para Agente Programador',
+      content: masterPromptContent,
+    },
     {
       relativePath: 'docs/01-brief-y-alcance.md',
       artifactCategory: 'brief_scope',
