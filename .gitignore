@@ -1,0 +1,21 @@
+# Dependencias y compilación
+node_modules/
+dist/
+coverage/
+
+# Secretos y variables de entorno (NUNCA versionar claves)
+.env
+.env.*
+!.env.example
+*.secret
+*.key
+secrets.json
+.data/secrets.json
+
+# Base de datos local y estado de ejecución
+.data/*.sqlite
+.data/*.sqlite-wal
+.data/*.sqlite-shm
+.data/backups/
+.data/exports/
+*.log
