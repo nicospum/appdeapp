@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -17,12 +18,34 @@ export interface ResolvedSecret {
 
 const windowsUserEnvCache = new Map<SecretKeyName, string | null>();
 
-function getSecretsFilePath(): string {
-  const dataDir = path.resolve(process.cwd(), '.data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+export function getWritableDataDir(): string {
+  const isServerless = Boolean(
+    process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL
+  );
+  if (isServerless) {
+    const tmpDir = path.join(os.tmpdir(), '.forja-data');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    return tmpDir;
   }
-  return path.join(dataDir, 'secrets.json');
+  try {
+    const dataDir = path.resolve(process.cwd(), '.data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    return dataDir;
+  } catch {
+    const fallbackDir = path.join(os.tmpdir(), '.forja-data');
+    if (!fs.existsSync(fallbackDir)) {
+      fs.mkdirSync(fallbackDir, { recursive: true });
+    }
+    return fallbackDir;
+  }
+}
+
+function getSecretsFilePath(): string {
+  return path.join(getWritableDataDir(), 'secrets.json');
 }
 
 function readLocalSecretsStore(): Partial<Record<SecretKeyName, string>> {

@@ -59,6 +59,42 @@ const DIMENSION_LABELS: Record<StackDimensionKey, string> = {
   evolution: 'Evolución',
 };
 
+const LOCAL_STORAGE_PROJECTS_KEY = 'forja_cached_projects_v1';
+
+function readCachedProjectsFromBrowser(): ProjectRecord[] {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_PROJECTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ProjectRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedProjectInBrowser(project: ProjectRecord): ProjectRecord[] {
+  try {
+    const current = readCachedProjectsFromBrowser();
+    const filtered = current.filter((p) => p.id !== project.id);
+    const updated = [project, ...filtered].slice(0, 30);
+    window.localStorage.setItem(LOCAL_STORAGE_PROJECTS_KEY, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [project];
+  }
+}
+
+function removeCachedProjectFromBrowser(projectId: string): ProjectRecord[] {
+  try {
+    const current = readCachedProjectsFromBrowser();
+    const updated = current.filter((p) => p.id !== projectId);
+    window.localStorage.setItem(LOCAL_STORAGE_PROJECTS_KEY, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
 export function App() {
   const [mainView, setMainView] = useState<ActiveMainView>('intake');
   const [wizardStep, setWizardStep] = useState<WizardStep>('questions');
@@ -167,7 +203,14 @@ export function App() {
         setOwnStackDecision(healthRes.optimizerStackDecision);
       }
       if (Array.isArray(projRes.projects)) {
-        setProjects(projRes.projects);
+        const cached = readCachedProjectsFromBrowser();
+        const byId = new Map<string, ProjectRecord>();
+        for (const p of cached) byId.set(p.id, p);
+        for (const p of projRes.projects as ProjectRecord[]) byId.set(p.id, p);
+        const merged = Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        setProjects(merged);
+      } else {
+        setProjects(readCachedProjectsFromBrowser());
       }
       if (Array.isArray(connRes.connections)) {
         setConnections(connRes.connections);
@@ -194,6 +237,14 @@ export function App() {
 
   function syncProjectToLocalState(project: ProjectRecord, projectRevisions?: BriefRevisionItem[]) {
     setCurrentProject(project);
+    const updatedList = saveCachedProjectInBrowser(project);
+    setProjects((prev) => {
+      const byId = new Map<string, ProjectRecord>();
+      for (const p of prev) byId.set(p.id, p);
+      for (const p of updatedList) byId.set(p.id, p);
+      byId.set(project.id, project);
+      return Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    });
     setEditTitle(project.brief.title);
     setEditObjective(project.brief.objective);
     setEditProblem(project.brief.problemStatement);
@@ -285,7 +336,7 @@ export function App() {
       const res = await fetch(`/api/projects/${encodeURIComponent(currentProject.id)}/brief`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputImages: updatedImages }),
+        body: JSON.stringify({ inputImages: updatedImages, _clientSnapshot: currentProject }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al adjuntar imágenes');
@@ -316,17 +367,27 @@ export function App() {
     setErrorBanner(null);
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al cargar proyecto');
-      syncProjectToLocalState(data.project, data.revisions || []);
-      if (Array.isArray(data.jevEvaluations)) {
-        setJevEvaluations(data.jevEvaluations);
+      let p: ProjectRecord | null = null;
+      if (res.ok) {
+        const data = await res.json();
+        p = data.project as ProjectRecord;
+        syncProjectToLocalState(p, data.revisions || []);
+        if (Array.isArray(data.jevEvaluations)) {
+          setJevEvaluations(data.jevEvaluations);
+        }
+      } else {
+        const cached = readCachedProjectsFromBrowser().find((item) => item.id === projectId) ||
+          projects.find((item) => item.id === projectId) || null;
+        if (!cached) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Error al cargar proyecto');
+        }
+        p = cached;
+        syncProjectToLocalState(p, [p.brief]);
       }
-      const p = data.project as ProjectRecord;
       if (preferredStep) {
         setWizardStep(preferredStep);
       } else {
-        // Si ya fue confirmado o avanzado con supuestos, mostramos directamente el Súper Prompt listo
         const allAnswered =
           p.brief.advancedWithAssumptions || p.brief.clarifyingQuestions.every((q) => q.status !== 'open');
         setWizardStep(allAnswered ? 'ready_prompt' : 'questions');
@@ -396,8 +457,9 @@ export function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'No se pudo crear el proyecto');
 
-      await loadInitialData();
-      await selectProject(data.project.id, 'questions');
+      syncProjectToLocalState(data.project, [data.project.brief]);
+      setWizardStep('questions');
+      setMainView('project');
       notifyToast('¡Listo! Respondé estas 2 preguntas rápidas para generar el Prompt Maestro.');
     } catch (err) {
       setErrorBanner(err instanceof Error ? err.message : String(err));
@@ -434,6 +496,7 @@ export function App() {
             .filter(Boolean),
           clarifyingAnswers,
           advanceWithAssumptions,
+          _clientSnapshot: currentProject,
         }),
       });
       const data = await res.json();
@@ -475,6 +538,7 @@ export function App() {
           maxNetworkRequests: researchMaxRequests,
           reuseCache: true,
           resumeRunId,
+          _clientSnapshot: currentProject,
         }),
       });
       const data = await res.json();
@@ -538,7 +602,7 @@ export function App() {
       const res = await fetch(`/api/projects/${encodeURIComponent(currentProject.id)}/stack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(opts),
+        body: JSON.stringify({ ...opts, _clientSnapshot: currentProject }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al recalcular stack');
@@ -563,6 +627,7 @@ export function App() {
         body: JSON.stringify({
           selectedCatalogIds,
           targetClients: selectedTargetClients,
+          _clientSnapshot: currentProject,
         }),
       });
       const data = await res.json();
@@ -784,15 +849,14 @@ export function App() {
   async function handleDeleteProject(projectId: string, e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
-      if (res.ok) {
-        if (currentProject?.id === projectId) {
-          setCurrentProject(null);
-          setMainView('intake');
-        }
-        await loadInitialData();
-        notifyToast('Proyecto eliminado.');
+      await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }).catch(() => null);
+      removeCachedProjectFromBrowser(projectId);
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      if (currentProject?.id === projectId) {
+        setCurrentProject(null);
+        setMainView('intake');
       }
+      notifyToast('Proyecto eliminado.');
     } catch (err) {
       setErrorBanner(err instanceof Error ? err.message : String(err));
     }

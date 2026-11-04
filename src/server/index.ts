@@ -30,8 +30,10 @@ async function startServer() {
       return;
     }
 
-    // Servir archivos estáticos de dist/client en modo producción
-    const clientDist = path.resolve(process.cwd(), 'dist', 'client');
+    // Servir archivos estáticos de dist en modo producción
+    const primaryDist = path.resolve(process.cwd(), 'dist');
+    const legacyDist = path.resolve(process.cwd(), 'dist', 'client');
+    const clientDist = fs.existsSync(path.join(primaryDist, 'index.html')) ? primaryDist : legacyDist;
     const urlPath = (req.url || '/').split('?')[0];
     const requestedFile = path.join(clientDist, urlPath === '/' ? 'index.html' : urlPath);
 

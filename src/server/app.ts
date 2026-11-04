@@ -49,11 +49,21 @@ import {
   UpdateBriefInputSchema,
   StartResearchInputSchema,
   AddCatalogCustomItemSchema,
+  type ProjectRecord,
   type ProviderConnectionStatus,
   type PriorityPresetId,
   type DimensionWeights,
   type SupportedClientId,
 } from '../shared/types.js';
+
+function maybeHydrateProjectFromSnapshot(projectId: string, body: Record<string, unknown>): void {
+  if (!getProjectById(projectId) && body._clientSnapshot && typeof body._clientSnapshot === 'object') {
+    const snap = body._clientSnapshot as ProjectRecord;
+    if (snap && snap.id === projectId && snap.brief) {
+      saveProject(snap);
+    }
+  }
+}
 
 let lastTypeSafeProbeState: {
   verifiedAt?: string;
@@ -173,7 +183,10 @@ export async function handleApiRequest(
   res: http.ServerResponse
 ): Promise<boolean> {
   const urlObj = new URL(req.url || '/', 'http://localhost');
-  const pathname = urlObj.pathname;
+  const rawPathname = urlObj.pathname;
+  const pathname = rawPathname.startsWith('/.netlify/functions/api')
+    ? '/api' + rawPathname.slice('/.netlify/functions/api'.length)
+    : rawPathname;
   const method = req.method || 'GET';
 
   if (!pathname.startsWith('/api/')) {
@@ -359,6 +372,7 @@ export async function handleApiRequest(
 
       if (subRoute === 'brief' && (method === 'PATCH' || method === 'POST')) {
         const body = await readJsonBody(req);
+        maybeHydrateProjectFromSnapshot(projectId, body);
         const parsed = UpdateBriefInputSchema.safeParse(body);
         if (!parsed.success) {
           sendJson(res, 400, { error: parsed.error.errors.map((e) => e.message).join('; ') });
@@ -372,6 +386,7 @@ export async function handleApiRequest(
 
       if (subRoute === 'research' && method === 'POST') {
         const body = await readJsonBody(req);
+        maybeHydrateProjectFromSnapshot(projectId, body);
         const resumeRunId = typeof body.resumeRunId === 'string' ? body.resumeRunId : undefined;
         const parsed = StartResearchInputSchema.safeParse(body);
         if (!parsed.success && !resumeRunId) {
@@ -390,6 +405,8 @@ export async function handleApiRequest(
 
       const cancelResearchMatch = subRoute.match(/^research\/([^/]+)\/cancel$/);
       if (cancelResearchMatch && method === 'POST') {
+        const body = await readJsonBody(req);
+        maybeHydrateProjectFromSnapshot(projectId, body);
         const runId = cancelResearchMatch[1];
         const run = cancelResearchRun(projectId, runId);
         const project = getProjectById(projectId);
@@ -399,6 +416,7 @@ export async function handleApiRequest(
 
       if (subRoute === 'stack' && method === 'POST') {
         const body = await readJsonBody(req);
+        maybeHydrateProjectFromSnapshot(projectId, body);
         const preset = body.preset as PriorityPresetId | undefined;
         const customWeights = body.customWeights as DimensionWeights | undefined;
         const selectedOptionId = typeof body.selectedOptionId === 'string' ? body.selectedOptionId : undefined;
@@ -413,6 +431,7 @@ export async function handleApiRequest(
 
       if (subRoute === 'capabilities' && method === 'POST') {
         const body = await readJsonBody(req);
+        maybeHydrateProjectFromSnapshot(projectId, body);
         const selectedCatalogIds = Array.isArray(body.selectedCatalogIds)
           ? (body.selectedCatalogIds as string[])
           : undefined;
